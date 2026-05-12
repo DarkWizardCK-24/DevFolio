@@ -5,6 +5,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 export async function GET(request: NextRequest) {
   const origin = new URL(request.url).origin;
   const cookieStore = await cookies();
+  const pending: { name: string; value: string; options: CookieOptions }[] = [];
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,11 +13,7 @@ export async function GET(request: NextRequest) {
     {
       cookies: {
         getAll() { return cookieStore.getAll(); },
-        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options),
-          );
-        },
+        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) { pending.push(...cookiesToSet); },
       },
     },
   );
@@ -33,5 +30,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/?error=oauth_init_failed`);
   }
 
-  return NextResponse.redirect(data.url);
+  const response = NextResponse.redirect(data.url);
+  pending.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+  return response;
 }
