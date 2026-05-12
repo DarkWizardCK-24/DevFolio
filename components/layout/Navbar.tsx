@@ -1,10 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  RiTerminalBoxFill,
   RiMenu3Line,
   RiCloseLine,
   RiArrowRightLine,
@@ -50,7 +50,7 @@ export default function Navbar() {
     <header className="fixed top-0 inset-x-0 z-50 backdrop-blur-md border-b border-[var(--color-border)] bg-[rgba(5,7,15,0.7)]">
       <div className="container-app flex items-center justify-between h-16 gap-4">
         <Link href="/" className="flex items-center gap-2 group shrink-0">
-          <RiTerminalBoxFill className="text-[var(--color-neon-green)] group-hover:text-[var(--color-neon-cyan)] transition-colors" size={22} />
+          <Image src="/logo.png" alt="DevFolio" width={28} height={28} className="rounded-sm opacity-90 group-hover:opacity-100 transition-opacity" />
           <span className="font-bold tracking-wide">
             <span className="text-[var(--color-neon-green)]">dev</span>
             <span className="text-[var(--color-neon-cyan)]">folio</span>

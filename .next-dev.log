@@ -1,0 +1,19 @@
+
+> devfolio@0.1.0 dev
+> next dev --port 3007
+
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://localhost:3007
+- Network:       http://192.168.1.52:3007
+✓ Ready in 1042ms
+
+○ Compiling / ...
+ GET / 200 in 5.5s (next.js: 4.8s, application-code: 747ms)
+ GET /darkwizardck-24 200 in 3.5s (next.js: 1709ms, application-code: 1761ms)
+ GET /DarkWizardCK-24 200 in 899ms (next.js: 18ms, application-code: 881ms)
+ GET /torvalds 200 in 622ms (next.js: 5ms, application-code: 617ms)
+ GET /octocat 200 in 527ms (next.js: 18ms, application-code: 509ms)
+ GET /this-user-definitely-does-not-exist-zzz999 404 in 95ms (next.js: 6ms, application-code: 90ms)
+ GET /torvalds 200 in 296ms (next.js: 20ms, application-code: 276ms)
+ GET /octocat 200 in 208ms (next.js: 17ms, application-code: 192ms)
+ GET /torvalds 200 in 219ms (next.js: 20ms, application-code: 199ms)

@@ -8,10 +8,12 @@ export const metadata: Metadata = {
   description:
     'Public developer portfolio that aggregates your GitHub activity, learning streaks, and pinned snippets. The hub of the dev ecosystem.',
   metadataBase: new URL('https://devfolio.local'),
+  icons: { icon: '/logo.png', apple: '/logo.png' },
   openGraph: {
     title: 'DevFolio',
     description: 'Public developer portfolio — terminal-style.',
     type: 'website',
+    images: [{ url: '/logo.png' }],
   },
 };
 
