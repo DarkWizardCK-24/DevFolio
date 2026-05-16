@@ -121,8 +121,6 @@ export default async function ProfilePage({ params }: Props) {
                 <a
                   key={app.slug}
                   href={app.url}
-                  target="_blank"
-                  rel="noreferrer"
                   className="flex flex-col gap-1 p-2.5 rounded border border-[var(--color-border)] hover:bg-[var(--color-surface-2)] transition-all group"
                 >
                   <span className="text-base">{app.icon}</span>
