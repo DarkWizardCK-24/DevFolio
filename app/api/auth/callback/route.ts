@@ -4,7 +4,10 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createHandoffTicket } from '@/lib/cross-app';
 
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0].trim();
+  const detectedOrigin = forwardedHost ? `https://${forwardedHost}` : new URL(request.url).origin;
+  const origin = (process.env.NEXT_PUBLIC_SITE_URL ?? '').replace(/\/$/, '') || detectedOrigin;
   const code = searchParams.get('code');
   const crossApp = searchParams.get('cross_app') === 'true';
   const childRedirect = searchParams.get('child_redirect');
