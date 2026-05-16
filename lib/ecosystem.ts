@@ -20,5 +20,5 @@ export const ECOSYSTEM: EcoApp[] = [
   { name: 'DevWidgets', slug: 'widgets', url: 'http://localhost:3009', desc: 'embeddable widgets', color: '#7c8fff', icon: '🧩' },
   { name: 'DevShare', slug: 'share', url: 'https://code-share-lovat.vercel.app', desc: 'share & showcase code snippets', color: '#ff4566', icon: '🔗' },
   { name: 'DevPulse', slug: 'pulse', url: 'https://dev-pulse-black.vercel.app', desc: 'dev activity & pulse tracker', color: '#00d4aa', icon: '📊' },
-  { name: 'DevAPK', slug: 'apk', url: 'http://localhost:3010', desc: 'android APK builds & distribution', color: '#FF6B2B', icon: '📦' },
+  { name: 'DevAPK', slug: 'apk', url: 'https://apk-hub-mu.vercel.app', desc: 'android APK builds & distribution', color: '#FF6B2B', icon: '📦' },
 ];
