@@ -2,8 +2,18 @@ import { createClient } from '@supabase/supabase-js';
 
 // Allowed origins that can request cross-app auth handoffs
 const ALLOWED_ORIGINS = [
-  'http://localhost:3010',
+  // localhost dev (each app's port)
+  'http://localhost:3001', // DevBlog
+  'http://localhost:3003', // DevRoadmap
+  'http://localhost:3004', // DevCalendar
+  'http://localhost:3005', // DevTimer
+  'http://localhost:3006', // DevNotes
+  'http://localhost:3007', // DevStatus
+  'http://localhost:3010', // DevBuildHub / APK Hub
+  // Vercel production
   'https://apk-hub-mu.vercel.app',
+  'https://code-share-lovat.vercel.app',
+  'https://dev-pulse-black.vercel.app',
 ];
 
 export function isAllowedRedirect(redirectTo: string): boolean {
