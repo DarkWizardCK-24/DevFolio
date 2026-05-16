@@ -3,7 +3,11 @@ import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function GET(request: NextRequest) {
-  const origin = new URL(request.url).origin;
+  const { searchParams, origin } = new URL(request.url);
+  const crossApp = searchParams.get('cross_app') === 'true';
+  const childRedirectTo = searchParams.get('redirect_to');
+  const childState = searchParams.get('state') ?? '/dashboard';
+
   const cookieStore = await cookies();
   const pending: { name: string; value: string; options: CookieOptions }[] = [];
 
@@ -18,10 +22,19 @@ export async function GET(request: NextRequest) {
     },
   );
 
+  // Embed cross-app params into the callback URL so they survive the OAuth round-trip
+  let callbackUrl = `${origin}/api/auth/callback`;
+  if (crossApp && childRedirectTo) {
+    callbackUrl +=
+      `?cross_app=true` +
+      `&child_redirect=${encodeURIComponent(childRedirectTo)}` +
+      `&child_state=${encodeURIComponent(childState)}`;
+  }
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'github',
     options: {
-      redirectTo: `${origin}/api/auth/callback`,
+      redirectTo: callbackUrl,
       skipBrowserRedirect: true,
     },
   });
