@@ -19,8 +19,6 @@ export default function EcoSystem() {
           <a
             key={app.slug}
             href={app.url}
-            target="_blank"
-            rel="noreferrer"
             className="group flex items-start gap-4 p-4 rounded border border-[var(--color-border)] bg-[rgba(15,20,40,0.3)] hover:bg-[rgba(15,20,40,0.6)] transition-all hover:scale-[1.01]"
             style={{ boxShadow: `0 0 0 1px ${app.color}00`, ['--hover-glow' as string]: `0 0 0 1px ${app.color}30` }}
           >
@@ -34,7 +32,7 @@ export default function EcoSystem() {
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold" style={{ color: app.color }}>{app.name}</span>
                 <span className="text-[10px] text-[var(--color-text-dim)] group-hover:text-[var(--color-text-muted)] transition-colors">
-                  ↗ open
+                  → open
                 </span>
               </div>
               <p className="text-xs text-[var(--color-text-muted)] mt-0.5 leading-relaxed">{app.desc}</p>

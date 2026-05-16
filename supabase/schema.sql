@@ -353,3 +353,161 @@ CREATE POLICY "incidents_owner_delete" ON incidents FOR DELETE
 
 -- ENV PROJECTS: owner only
 CREATE POLICY "env_projects_owner" ON env_projects FOR ALL USING (auth.uid() = user_id);
+
+-- ============================================================
+-- APK APPS (DevAPK Hub)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS apk_apps (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id         UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,
+  slug            TEXT NOT NULL,
+  description     TEXT DEFAULT '',
+  package_name    TEXT NOT NULL DEFAULT '',
+  icon_url        TEXT,
+  category        TEXT NOT NULL DEFAULT 'other'
+                    CHECK (category IN ('utility','game','productivity','social','media','finance','education','other')),
+  tags            TEXT[] DEFAULT '{}',
+  is_public       BOOLEAN DEFAULT TRUE,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (user_id, slug)
+);
+
+CREATE TRIGGER trg_apk_apps_updated_at
+  BEFORE UPDATE ON apk_apps
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_apk_apps_user     ON apk_apps(user_id);
+CREATE INDEX IF NOT EXISTS idx_apk_apps_public   ON apk_apps(is_public, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_apk_apps_category ON apk_apps(category, is_public);
+
+-- ============================================================
+-- APK BUILDS (DevAPK Hub)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS apk_builds (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  app_id          UUID NOT NULL REFERENCES apk_apps(id) ON DELETE CASCADE,
+  user_id         UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  version_name    TEXT NOT NULL,
+  version_code    INTEGER NOT NULL DEFAULT 1,
+  file_url        TEXT NOT NULL,
+  file_name       TEXT NOT NULL,
+  file_size       BIGINT NOT NULL DEFAULT 0,
+  build_type      TEXT NOT NULL DEFAULT 'release'
+                    CHECK (build_type IN ('debug','release')),
+  changelog       TEXT DEFAULT '',
+  min_sdk         INTEGER DEFAULT 21,
+  target_sdk      INTEGER DEFAULT 34,
+  permissions     TEXT[] DEFAULT '{}',
+  download_count  INTEGER NOT NULL DEFAULT 0,
+  sha256          TEXT DEFAULT '',
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_apk_builds_app  ON apk_builds(app_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_apk_builds_user ON apk_builds(user_id);
+
+CREATE OR REPLACE FUNCTION increment_apk_download(build_id UUID)
+RETURNS void AS $$
+BEGIN
+  UPDATE apk_builds SET download_count = download_count + 1 WHERE id = build_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+ALTER TABLE apk_apps   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE apk_builds ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "apk_apps_public_read"
+  ON apk_apps FOR SELECT USING (is_public = true OR auth.uid() = user_id);
+CREATE POLICY "apk_apps_owner_insert"
+  ON apk_apps FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "apk_apps_owner_update"
+  ON apk_apps FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "apk_apps_owner_delete"
+  ON apk_apps FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "apk_builds_public_read"
+  ON apk_builds FOR SELECT
+  USING (EXISTS (
+    SELECT 1 FROM apk_apps
+    WHERE id = apk_builds.app_id AND (is_public = true OR user_id = auth.uid())
+  ));
+CREATE POLICY "apk_builds_owner_insert"
+  ON apk_builds FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "apk_builds_owner_delete"
+  ON apk_builds FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================================
+-- STORAGE — apk-files bucket
+-- ============================================================
+-- Creates the bucket (safe to re-run — ON CONFLICT DO NOTHING)
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'apk-files',
+  'apk-files',
+  true,
+  52428800,    -- 50 MB per file (Supabase free tier limit)
+  ARRAY[
+    'application/vnd.android.package-archive',
+    'application/octet-stream',
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif'
+  ]
+)
+ON CONFLICT (id) DO UPDATE
+  SET public             = EXCLUDED.public,
+      file_size_limit    = EXCLUDED.file_size_limit,
+      allowed_mime_types = EXCLUDED.allowed_mime_types;
+
+-- ── Storage RLS policies for apk-files ──────────────────────
+
+-- Anyone can read/download public files
+CREATE POLICY "apk_files_public_read"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'apk-files');
+
+-- Authenticated users can upload into their own folder ({user_id}/...)
+CREATE POLICY "apk_files_owner_upload"
+  ON storage.objects FOR INSERT
+  WITH CHECK (
+    bucket_id = 'apk-files'
+    AND auth.role() = 'authenticated'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- Authenticated users can update their own files
+CREATE POLICY "apk_files_owner_update"
+  ON storage.objects FOR UPDATE
+  USING (
+    bucket_id = 'apk-files'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+-- Authenticated users can delete their own files
+CREATE POLICY "apk_files_owner_delete"
+  ON storage.objects FOR DELETE
+  USING (
+    bucket_id = 'apk-files'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+-- ============================================================
+-- CROSS-APP HANDOFFS (single-login across DevEco ecosystem)
+-- ============================================================
+-- One-time-use tickets that let child apps (APK Hub, CodeShare, etc.)
+-- inherit the DevFolio GitHub session without re-authenticating.
+CREATE TABLE IF NOT EXISTS public.cross_app_handoffs (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  access_token  TEXT        NOT NULL,
+  refresh_token TEXT        NOT NULL,
+  used          BOOLEAN     NOT NULL DEFAULT FALSE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at    TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '5 minutes'
+);
+
+ALTER TABLE public.cross_app_handoffs ENABLE ROW LEVEL SECURITY;
+-- No user-facing policies — only service_role (bypasses RLS) can read/write.
