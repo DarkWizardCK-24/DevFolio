@@ -493,3 +493,21 @@ CREATE POLICY "apk_files_owner_delete"
     bucket_id = 'apk-files'
     AND auth.uid()::text = (storage.foldername(name))[1]
   );
+
+-- ============================================================
+-- CROSS-APP HANDOFFS (single-login across DevEco ecosystem)
+-- ============================================================
+-- One-time-use tickets that let child apps (APK Hub, CodeShare, etc.)
+-- inherit the DevFolio GitHub session without re-authenticating.
+CREATE TABLE IF NOT EXISTS public.cross_app_handoffs (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  access_token  TEXT        NOT NULL,
+  refresh_token TEXT        NOT NULL,
+  used          BOOLEAN     NOT NULL DEFAULT FALSE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at    TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '5 minutes'
+);
+
+ALTER TABLE public.cross_app_handoffs ENABLE ROW LEVEL SECURITY;
+-- No user-facing policies — only service_role (bypasses RLS) can read/write.
