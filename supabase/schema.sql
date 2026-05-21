@@ -439,6 +439,35 @@ CREATE POLICY "apk_builds_owner_delete"
   ON apk_builds FOR DELETE USING (auth.uid() = user_id);
 
 -- ============================================================
+-- CODE SNIPPETS (codeshare / DevShare)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS code_snippets (
+  id          TEXT PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  title       TEXT NOT NULL DEFAULT 'Untitled Snippet',
+  filename    TEXT DEFAULT '',
+  language    TEXT NOT NULL DEFAULT 'javascript',
+  code        TEXT NOT NULL,
+  notes       TEXT DEFAULT '',
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TRIGGER trg_code_snippets_updated_at
+  BEFORE UPDATE ON code_snippets
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_code_snippets_user ON code_snippets(user_id, created_at DESC);
+
+ALTER TABLE code_snippets ENABLE ROW LEVEL SECURITY;
+
+-- Public read (shared snippet links work for anyone)
+CREATE POLICY "code_snippets_public_read"  ON code_snippets FOR SELECT USING (true);
+CREATE POLICY "code_snippets_owner_insert" ON code_snippets FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "code_snippets_owner_update" ON code_snippets FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "code_snippets_owner_delete" ON code_snippets FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================================
 -- STORAGE — apk-files bucket
 -- ============================================================
 -- Creates the bucket (safe to re-run — ON CONFLICT DO NOTHING)
@@ -493,21 +522,3 @@ CREATE POLICY "apk_files_owner_delete"
     bucket_id = 'apk-files'
     AND auth.uid()::text = (storage.foldername(name))[1]
   );
-
--- ============================================================
--- CROSS-APP HANDOFFS (single-login across DevEco ecosystem)
--- ============================================================
--- One-time-use tickets that let child apps (APK Hub, CodeShare, etc.)
--- inherit the DevFolio GitHub session without re-authenticating.
-CREATE TABLE IF NOT EXISTS public.cross_app_handoffs (
-  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id       UUID        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  access_token  TEXT        NOT NULL,
-  refresh_token TEXT        NOT NULL,
-  used          BOOLEAN     NOT NULL DEFAULT FALSE,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  expires_at    TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '5 minutes'
-);
-
-ALTER TABLE public.cross_app_handoffs ENABLE ROW LEVEL SECURITY;
--- No user-facing policies — only service_role (bypasses RLS) can read/write.
