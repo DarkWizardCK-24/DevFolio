@@ -21,23 +21,25 @@ $$ LANGUAGE plpgsql;
 -- PROFILES (DevFolio hub — one row per authenticated user)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS profiles (
-  id            UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  username      TEXT UNIQUE NOT NULL,
-  display_name  TEXT,
-  bio           TEXT DEFAULT '',
-  location      TEXT DEFAULT '',
-  website       TEXT DEFAULT '',
-  status        TEXT DEFAULT '',
-  tags          TEXT[] DEFAULT '{}',
-  avatar_url    TEXT,
+  id              UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  username        TEXT UNIQUE NOT NULL,
+  display_name    TEXT,
+  bio             TEXT DEFAULT '',
+  location        TEXT DEFAULT '',
+  website         TEXT DEFAULT '',
+  status          TEXT DEFAULT '',
+  tags            TEXT[] DEFAULT '{}',
+  avatar_url      TEXT,
   github_username TEXT,
-  created_at    TIMESTAMPTZ DEFAULT NOW(),
-  updated_at    TIMESTAMPTZ DEFAULT NOW()
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TRIGGER trg_profiles_updated_at
   BEFORE UPDATE ON profiles
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_profiles_github ON profiles(github_username);
 
 -- Auto-create profile on GitHub sign-in
 CREATE OR REPLACE FUNCTION handle_new_user()
@@ -46,8 +48,12 @@ BEGIN
   INSERT INTO public.profiles (id, username, display_name, avatar_url, github_username)
   VALUES (
     NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'user_name', NEW.email),
-    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'user_name'),
+    COALESCE(NEW.raw_user_meta_data->>'user_name', split_part(NEW.email, '@', 1)),
+    COALESCE(
+      NEW.raw_user_meta_data->>'full_name',
+      NEW.raw_user_meta_data->>'user_name',
+      split_part(NEW.email, '@', 1)
+    ),
     NEW.raw_user_meta_data->>'avatar_url',
     NEW.raw_user_meta_data->>'user_name'
   )
@@ -95,7 +101,8 @@ CREATE TRIGGER trg_snippets_updated_at
   BEFORE UPDATE ON snippets
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-CREATE INDEX IF NOT EXISTS idx_snippets_user ON snippets(user_id);
+CREATE INDEX IF NOT EXISTS idx_snippets_user   ON snippets(user_id);
+CREATE INDEX IF NOT EXISTS idx_snippets_pinned ON snippets(user_id, pinned) WHERE pinned = TRUE;
 
 -- ============================================================
 -- GITHUB CACHE (DevFolio — avoid GitHub rate limiting)
@@ -125,7 +132,7 @@ CREATE TRIGGER trg_notes_updated_at
   BEFORE UPDATE ON notes
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(user_id);
+CREATE INDEX IF NOT EXISTS idx_notes_user    ON notes(user_id);
 CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(user_id, updated_at DESC);
 
 -- ============================================================
@@ -162,7 +169,7 @@ CREATE INDEX IF NOT EXISTS idx_calendar_events_user ON calendar_events(user_id);
 CREATE INDEX IF NOT EXISTS idx_calendar_events_date ON calendar_events(user_id, date);
 
 -- ============================================================
--- GOALS (DevCalendar)
+-- CALENDAR GOALS (DevCalendar)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS calendar_goals (
   id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -193,7 +200,7 @@ CREATE TABLE IF NOT EXISTS roadmap_progress (
   UNIQUE (user_id, track_id, skill_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_roadmap_progress_user ON roadmap_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_roadmap_progress_user  ON roadmap_progress(user_id);
 CREATE INDEX IF NOT EXISTS idx_roadmap_progress_track ON roadmap_progress(user_id, track_id);
 
 -- ============================================================
@@ -206,9 +213,12 @@ CREATE TABLE IF NOT EXISTS blog_posts (
   slug         TEXT NOT NULL,
   content_md   TEXT NOT NULL DEFAULT '',
   excerpt      TEXT DEFAULT '',
+  cover_url    TEXT,
   tags         TEXT[] DEFAULT '{}',
   published    BOOLEAN DEFAULT FALSE,
   published_at TIMESTAMPTZ,
+  views        INTEGER NOT NULL DEFAULT 0,
+  read_time    INTEGER NOT NULL DEFAULT 1,
   created_at   TIMESTAMPTZ DEFAULT NOW(),
   updated_at   TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (user_id, slug)
@@ -218,8 +228,52 @@ CREATE TRIGGER trg_blog_posts_updated_at
   BEFORE UPDATE ON blog_posts
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-CREATE INDEX IF NOT EXISTS idx_blog_posts_user ON blog_posts(user_id);
+CREATE INDEX IF NOT EXISTS idx_blog_posts_user      ON blog_posts(user_id);
 CREATE INDEX IF NOT EXISTS idx_blog_posts_published ON blog_posts(published, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_blog_posts_tags      ON blog_posts USING gin(tags);
+
+-- ============================================================
+-- BLOG POST LIKES (DevBlog)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS blog_post_likes (
+  post_id    UUID NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE,
+  user_id    UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (post_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_blog_likes_post ON blog_post_likes(post_id);
+
+-- ============================================================
+-- BLOG COMMENTS (DevBlog)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS blog_comments (
+  id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  post_id    UUID NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE,
+  user_id    UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  content    TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TRIGGER trg_blog_comments_updated_at
+  BEFORE UPDATE ON blog_comments
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_blog_comments_post ON blog_comments(post_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_blog_comments_user ON blog_comments(user_id);
+
+-- ============================================================
+-- BLOG BOOKMARKS (DevBlog)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS blog_bookmarks (
+  post_id    UUID NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE,
+  user_id    UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (post_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_blog_bookmarks_user ON blog_bookmarks(user_id, created_at DESC);
 
 -- ============================================================
 -- STATUS PAGES (DevStatus)
@@ -238,6 +292,7 @@ CREATE TRIGGER trg_status_pages_updated_at
   BEFORE UPDATE ON status_pages
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+CREATE INDEX IF NOT EXISTS idx_status_pages_user     ON status_pages(user_id);
 CREATE INDEX IF NOT EXISTS idx_status_pages_username ON status_pages(username);
 
 -- ============================================================
@@ -256,7 +311,8 @@ CREATE TABLE IF NOT EXISTS incidents (
   resolved_at    TIMESTAMPTZ
 );
 
-CREATE INDEX IF NOT EXISTS idx_incidents_page ON incidents(status_page_id);
+CREATE INDEX IF NOT EXISTS idx_incidents_page   ON incidents(status_page_id);
+CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status_page_id, status);
 
 -- ============================================================
 -- ENV VAULT (DevEnv)
@@ -281,77 +337,117 @@ CREATE INDEX IF NOT EXISTS idx_env_projects_user ON env_projects(user_id);
 -- ROW LEVEL SECURITY
 -- ============================================================
 
-ALTER TABLE github_cache    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE profiles        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE learning_goals  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE snippets        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE notes           ENABLE ROW LEVEL SECURITY;
-ALTER TABLE timer_sessions  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE calendar_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE calendar_goals  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE roadmap_progress ENABLE ROW LEVEL SECURITY;
-ALTER TABLE blog_posts      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE status_pages    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE incidents       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE env_projects    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE github_cache      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE learning_goals    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE snippets          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notes             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE timer_sessions    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE calendar_events   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE calendar_goals    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE roadmap_progress  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE blog_posts        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE blog_post_likes   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE blog_comments     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE blog_bookmarks    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE status_pages      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE incidents         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE env_projects      ENABLE ROW LEVEL SECURITY;
 
--- GITHUB CACHE: public read, authenticated upsert
-CREATE POLICY "github_cache_public_read"         ON github_cache FOR SELECT USING (true);
-CREATE POLICY "github_cache_authenticated_insert" ON github_cache FOR INSERT WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "github_cache_authenticated_update" ON github_cache FOR UPDATE USING (auth.role() = 'authenticated');
+-- ── GITHUB CACHE ──────────────────────────────────────────────────────────────
+-- Public read; writes scoped to the authenticated user's own GitHub username.
+-- Server-side service role always bypasses RLS.
+CREATE POLICY "github_cache_public_read" ON github_cache FOR SELECT USING (true);
+CREATE POLICY "github_cache_own_insert"  ON github_cache FOR INSERT
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND github_username = github_cache.username)
+  );
+CREATE POLICY "github_cache_own_update"  ON github_cache FOR UPDATE
+  USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND github_username = github_cache.username)
+  );
 
--- PROFILES: public read, owner write
+-- ── PROFILES ─────────────────────────────────────────────────────────────────
 CREATE POLICY "profiles_public_read"  ON profiles FOR SELECT USING (true);
 CREATE POLICY "profiles_owner_insert" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
 CREATE POLICY "profiles_owner_update" ON profiles FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "profiles_owner_delete" ON profiles FOR DELETE USING (auth.uid() = id);
 
--- LEARNING GOALS: owner only
+-- ── LEARNING GOALS ────────────────────────────────────────────────────────────
 CREATE POLICY "learning_goals_owner" ON learning_goals FOR ALL USING (auth.uid() = user_id);
 
--- SNIPPETS: public read pinned, owner all
-CREATE POLICY "snippets_public_read"  ON snippets FOR SELECT USING (pinned = true OR auth.uid() = user_id);
-CREATE POLICY "snippets_owner_write"  ON snippets FOR INSERT WITH CHECK (auth.uid() = user_id);
+-- ── SNIPPETS ─────────────────────────────────────────────────────────────────
+-- Pinned snippets visible to public; all snippets visible to owner
+CREATE POLICY "snippets_select"       ON snippets FOR SELECT USING (pinned = TRUE OR auth.uid() = user_id);
+CREATE POLICY "snippets_owner_insert" ON snippets FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "snippets_owner_update" ON snippets FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "snippets_owner_delete" ON snippets FOR DELETE USING (auth.uid() = user_id);
 
--- NOTES: owner only
+-- ── NOTES ─────────────────────────────────────────────────────────────────────
 CREATE POLICY "notes_owner" ON notes FOR ALL USING (auth.uid() = user_id);
 
--- TIMER SESSIONS: owner only
+-- ── TIMER SESSIONS ────────────────────────────────────────────────────────────
 CREATE POLICY "timer_sessions_owner" ON timer_sessions FOR ALL USING (auth.uid() = user_id);
 
--- CALENDAR EVENTS: owner only
+-- ── CALENDAR EVENTS ──────────────────────────────────────────────────────────
 CREATE POLICY "calendar_events_owner" ON calendar_events FOR ALL USING (auth.uid() = user_id);
 
--- CALENDAR GOALS: owner only
+-- ── CALENDAR GOALS ────────────────────────────────────────────────────────────
 CREATE POLICY "calendar_goals_owner" ON calendar_goals FOR ALL USING (auth.uid() = user_id);
 
--- ROADMAP PROGRESS: owner only
+-- ── ROADMAP PROGRESS ─────────────────────────────────────────────────────────
 CREATE POLICY "roadmap_progress_owner" ON roadmap_progress FOR ALL USING (auth.uid() = user_id);
 
--- BLOG POSTS: public read published, owner all
-CREATE POLICY "blog_posts_public_read"  ON blog_posts FOR SELECT USING (published = true OR auth.uid() = user_id);
-CREATE POLICY "blog_posts_owner_insert" ON blog_posts FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "blog_posts_owner_update" ON blog_posts FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "blog_posts_owner_delete" ON blog_posts FOR DELETE USING (auth.uid() = user_id);
+-- ── BLOG POSTS ───────────────────────────────────────────────────────────────
+CREATE POLICY "blog_posts_select"       ON blog_posts FOR SELECT
+  USING (published = TRUE OR auth.uid() = user_id);
+CREATE POLICY "blog_posts_owner_insert" ON blog_posts FOR INSERT  WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "blog_posts_owner_update" ON blog_posts FOR UPDATE  USING (auth.uid() = user_id);
+CREATE POLICY "blog_posts_owner_delete" ON blog_posts FOR DELETE  USING (auth.uid() = user_id);
 
--- STATUS PAGES: public read, owner write
+-- ── BLOG LIKES ───────────────────────────────────────────────────────────────
+CREATE POLICY "blog_likes_public_read"  ON blog_post_likes FOR SELECT USING (true);
+CREATE POLICY "blog_likes_owner_insert" ON blog_post_likes FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "blog_likes_owner_delete" ON blog_post_likes FOR DELETE USING (auth.uid() = user_id);
+
+-- ── BLOG COMMENTS ────────────────────────────────────────────────────────────
+-- Readable on any published post (or owner's own drafts); owner edits own comments
+CREATE POLICY "blog_comments_select" ON blog_comments FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM blog_posts
+      WHERE id = post_id AND (published = TRUE OR user_id = auth.uid())
+    )
+  );
+CREATE POLICY "blog_comments_owner_insert" ON blog_comments FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "blog_comments_owner_update" ON blog_comments FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "blog_comments_owner_delete" ON blog_comments FOR DELETE USING (auth.uid() = user_id);
+
+-- ── BLOG BOOKMARKS ───────────────────────────────────────────────────────────
+CREATE POLICY "blog_bookmarks_owner" ON blog_bookmarks FOR ALL USING (auth.uid() = user_id);
+
+-- ── STATUS PAGES ─────────────────────────────────────────────────────────────
 CREATE POLICY "status_pages_public_read"  ON status_pages FOR SELECT USING (true);
 CREATE POLICY "status_pages_owner_insert" ON status_pages FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "status_pages_owner_update" ON status_pages FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "status_pages_owner_delete" ON status_pages FOR DELETE USING (auth.uid() = user_id);
 
--- INCIDENTS: public read, owner of the status page writes
-CREATE POLICY "incidents_public_read" ON incidents FOR SELECT USING (true);
-CREATE POLICY "incidents_owner_write" ON incidents FOR INSERT
-  WITH CHECK (EXISTS (SELECT 1 FROM status_pages WHERE id = status_page_id AND user_id = auth.uid()));
+-- ── INCIDENTS ────────────────────────────────────────────────────────────────
+CREATE POLICY "incidents_public_read"  ON incidents FOR SELECT USING (true);
+CREATE POLICY "incidents_owner_insert" ON incidents FOR INSERT
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM status_pages WHERE id = status_page_id AND user_id = auth.uid())
+  );
 CREATE POLICY "incidents_owner_update" ON incidents FOR UPDATE
-  USING (EXISTS (SELECT 1 FROM status_pages WHERE id = status_page_id AND user_id = auth.uid()));
+  USING (
+    EXISTS (SELECT 1 FROM status_pages WHERE id = status_page_id AND user_id = auth.uid())
+  );
 CREATE POLICY "incidents_owner_delete" ON incidents FOR DELETE
-  USING (EXISTS (SELECT 1 FROM status_pages WHERE id = status_page_id AND user_id = auth.uid()));
+  USING (
+    EXISTS (SELECT 1 FROM status_pages WHERE id = status_page_id AND user_id = auth.uid())
+  );
 
--- ENV PROJECTS: owner only
+-- ── ENV PROJECTS ─────────────────────────────────────────────────────────────
 CREATE POLICY "env_projects_owner" ON env_projects FOR ALL USING (auth.uid() = user_id);
 
 -- ============================================================
@@ -408,38 +504,27 @@ CREATE TABLE IF NOT EXISTS apk_builds (
 CREATE INDEX IF NOT EXISTS idx_apk_builds_app  ON apk_builds(app_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_apk_builds_user ON apk_builds(user_id);
 
-CREATE OR REPLACE FUNCTION increment_apk_download(build_id UUID)
-RETURNS void AS $$
-BEGIN
-  UPDATE apk_builds SET download_count = download_count + 1 WHERE id = build_id;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
 ALTER TABLE apk_apps   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE apk_builds ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "apk_apps_public_read"
-  ON apk_apps FOR SELECT USING (is_public = true OR auth.uid() = user_id);
-CREATE POLICY "apk_apps_owner_insert"
-  ON apk_apps FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "apk_apps_owner_update"
-  ON apk_apps FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "apk_apps_owner_delete"
-  ON apk_apps FOR DELETE USING (auth.uid() = user_id);
+CREATE POLICY "apk_apps_select"       ON apk_apps FOR SELECT USING (is_public = TRUE OR auth.uid() = user_id);
+CREATE POLICY "apk_apps_owner_insert" ON apk_apps FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "apk_apps_owner_update" ON apk_apps FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "apk_apps_owner_delete" ON apk_apps FOR DELETE USING (auth.uid() = user_id);
 
-CREATE POLICY "apk_builds_public_read"
-  ON apk_builds FOR SELECT
-  USING (EXISTS (
-    SELECT 1 FROM apk_apps
-    WHERE id = apk_builds.app_id AND (is_public = true OR user_id = auth.uid())
-  ));
-CREATE POLICY "apk_builds_owner_insert"
-  ON apk_builds FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "apk_builds_owner_delete"
-  ON apk_builds FOR DELETE USING (auth.uid() = user_id);
+CREATE POLICY "apk_builds_select" ON apk_builds FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM apk_apps
+      WHERE id = apk_builds.app_id AND (is_public = TRUE OR user_id = auth.uid())
+    )
+  );
+CREATE POLICY "apk_builds_owner_insert" ON apk_builds FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "apk_builds_owner_update" ON apk_builds FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "apk_builds_owner_delete" ON apk_builds FOR DELETE USING (auth.uid() = user_id);
 
 -- ============================================================
--- CODE SNIPPETS (codeshare / DevShare)
+-- CODE SNIPPETS (DevShare)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS code_snippets (
   id          TEXT PRIMARY KEY,
@@ -468,15 +553,35 @@ CREATE POLICY "code_snippets_owner_update" ON code_snippets FOR UPDATE USING (au
 CREATE POLICY "code_snippets_owner_delete" ON code_snippets FOR DELETE USING (auth.uid() = user_id);
 
 -- ============================================================
+-- HELPER FUNCTIONS
+-- ============================================================
+
+-- Increment view counter (published posts only; safe to call from client)
+CREATE OR REPLACE FUNCTION increment_post_views(p_post_id UUID)
+RETURNS void AS $$
+BEGIN
+  UPDATE blog_posts SET views = views + 1
+  WHERE id = p_post_id AND published = TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Increment APK download counter (safe to call from client)
+CREATE OR REPLACE FUNCTION increment_apk_download(build_id UUID)
+RETURNS void AS $$
+BEGIN
+  UPDATE apk_builds SET download_count = download_count + 1 WHERE id = build_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================================
 -- STORAGE — apk-files bucket
 -- ============================================================
--- Creates the bucket (safe to re-run — ON CONFLICT DO NOTHING)
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
   'apk-files',
   'apk-files',
   true,
-  52428800,    -- 50 MB per file (Supabase free tier limit)
+  52428800,
   ARRAY[
     'application/vnd.android.package-archive',
     'application/octet-stream',
@@ -490,8 +595,6 @@ ON CONFLICT (id) DO UPDATE
   SET public             = EXCLUDED.public,
       file_size_limit    = EXCLUDED.file_size_limit,
       allowed_mime_types = EXCLUDED.allowed_mime_types;
-
--- ── Storage RLS policies for apk-files ──────────────────────
 
 -- Anyone can read/download public files
 CREATE POLICY "apk_files_public_read"
